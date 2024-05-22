@@ -581,6 +581,7 @@ class FullModelMetaCheckpointer(_CheckpointerInterface):
         adapter_checkpoint: Optional[str] = None,
         recipe_checkpoint: Optional[str] = None,
         resume_from_checkpoint: bool = False,
+        save_only_trainable_params_for_intermediate_checkpoint: bool = False,
     ) -> None:
         # Fail fast if ``checkpoint_files`` is invalid
         if len(checkpoint_files) != 1:
@@ -647,19 +648,20 @@ class FullModelMetaCheckpointer(_CheckpointerInterface):
                 and (if applicable) adapter weights are created. Default is False
         """
         self._output_dir.mkdir(exist_ok=True)
-        model_state_dict = state_dict[utils.MODEL_KEY]
-        state_dict[utils.MODEL_KEY] = convert_weights.tune_to_meta(model_state_dict)
 
-        # Output file is always a .pt file with the epoch number in the name
-        checkpoint_file = Path.joinpath(
-            self._output_dir, f"meta_model_{epoch}"
-        ).with_suffix(".pt")
-        torch.save(state_dict[utils.MODEL_KEY], checkpoint_file)
-        logger.info(
-            "Model checkpoint of size "
-            f"{os.path.getsize(checkpoint_file) / 1000**3:.2f} GB "
-            f"saved to {checkpoint_file}"
-        )
+        if utils.MODEL_KEY in state_dict:
+            model_state_dict = state_dict[utils.MODEL_KEY]
+            state_dict[utils.MODEL_KEY] = convert_weights.tune_to_meta(model_state_dict)
+            # Output file is always a .pt file with the epoch number in the name
+            checkpoint_file = Path.joinpath(
+                self._output_dir, f"meta_model_{epoch}"
+            ).with_suffix(".pt")
+            torch.save(state_dict[utils.MODEL_KEY], checkpoint_file)
+            logger.info(
+                "Model checkpoint of size "
+                f"{os.path.getsize(checkpoint_file) / 1000**3:.2f} GB "
+                f"saved to {checkpoint_file}"
+            )
 
         if utils.ADAPTER_KEY in state_dict:
             output_path = Path.joinpath(
@@ -675,7 +677,7 @@ class FullModelMetaCheckpointer(_CheckpointerInterface):
         # If the recipe state needs to be output, first remove the model state dict
         # and if it exists, remove the adapter state dict as well
         if intermediate_checkpoint:
-            _ = state_dict.pop(utils.MODEL_KEY)
+            _ = state_dict.pop(utils.MODEL_KEY, None)
             _ = state_dict.pop(utils.ADAPTER_KEY, None)
             _ = state_dict.pop(utils.ADAPTER_CONFIG, None)
             output_path = Path.joinpath(self._output_dir, "recipe_state.pt")

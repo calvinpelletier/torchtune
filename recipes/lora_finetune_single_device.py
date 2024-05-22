@@ -129,6 +129,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
 
         self._resume_from_checkpoint = cfg.resume_from_checkpoint
         self._gradient_accumulation_steps = cfg.gradient_accumulation_steps
+        self._save_only_trainable_params_for_intermediate_checkpoint = cfg.checkpointer.save_only_trainable_params_for_intermediate_checkpoint
 
     def load_checkpoint(self, cfg_checkpointer: DictConfig) -> Dict[str, Any]:
         """
@@ -391,8 +392,9 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         and recipe state must be provided along with the base model weights.
         """
         ckpt_dict = {}
+        is_intermediate_checkpoint = epoch + 1 < self.total_epochs
         # if training is in-progress, checkpoint the optimizer state as well
-        if epoch + 1 < self.total_epochs:
+        if is_intermediate_checkpoint:
             ckpt_dict.update(
                 {
                     utils.OPT_KEY: self._optimizer.state_dict(),
@@ -407,12 +409,13 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         state_dict = {k: v.cpu() for k, v in self._model.state_dict().items()}
 
         # Construct the full state dict with LoRA weights merged into base LLM weights
-        merged_state_dict = get_merged_lora_ckpt(
-            state_dict,
-            rank=self._lora_rank,
-            alpha=self._lora_alpha,
-        )
-        ckpt_dict.update({utils.MODEL_KEY: merged_state_dict})
+        if not (self._save_only_trainable_params_for_intermediate_checkpoint and is_intermediate_checkpoint):
+            merged_state_dict = get_merged_lora_ckpt(
+                state_dict,
+                rank=self._lora_rank,
+                alpha=self._lora_alpha,
+            )
+            ckpt_dict.update({utils.MODEL_KEY: merged_state_dict})
 
         # Construct the adapter weights
         adapter_key_filter = lambda x: x in self.adapter_params
@@ -434,7 +437,7 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
         self._checkpointer.save_checkpoint(
             ckpt_dict,
             epoch=epoch,
-            intermediate_checkpoint=(epoch + 1 < self.total_epochs),
+            intermediate_checkpoint=is_intermediate_checkpoint,
         )
 
     def train(self) -> None:
