@@ -30,7 +30,7 @@ from torchtune import config
 
 
 class TestLoRAFinetuneSingleDeviceRecipe:
-    def _get_test_config_overrides(self, dtype_str: str = "fp32"):
+    def _get_test_config_overrides(self, dtype_str: str = "fp32", epochs: int = 2):
         return [
             "batch_size=8",
             "device=cpu",
@@ -38,7 +38,7 @@ class TestLoRAFinetuneSingleDeviceRecipe:
             "enable_activation_checkpointing=False",
             "dataset.train_on_input=False",
             "seed=9",
-            "epochs=2",
+            f"epochs={epochs}",
             "max_steps_per_epoch=2",
             "optimizer.lr=2e-5",
             "log_every_n_steps=1",
@@ -205,7 +205,7 @@ class TestLoRAFinetuneSingleDeviceRecipe:
             metric_logger.filename={log_file} \
             tokenizer.path=/tmp/test-artifacts/tokenizer.model \
         """.split()
-        cmd_2 = cmd_2 + self._get_test_config_overrides() + model_config
+        cmd_2 = cmd_2 + self._get_test_config_overrides(epochs=3) + model_config
         monkeypatch.setattr(sys, "argv", cmd_2)
         with pytest.raises(SystemExit, match=""):
             runpy.run_path(TUNE_PATH, run_name="__main__")
@@ -217,6 +217,8 @@ class TestLoRAFinetuneSingleDeviceRecipe:
         torch.testing.assert_close(
             loss_values, expected_loss_values, rtol=1e-5, atol=1e-5
         )
+        print(tmpdir)
+        assert False
 
     @pytest.mark.integration_test
     def test_save_and_load_merged_weights(self, tmpdir, monkeypatch):
