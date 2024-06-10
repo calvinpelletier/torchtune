@@ -24,6 +24,7 @@ from torchtune.modules.peft.peft_utils import (
     get_adapter_params,
     get_lora_module_names,
     get_merged_lora_ckpt,
+    initialize_dora_model,
     set_trainable_params,
     validate_missing_and_unexpected_for_lora,
 )
@@ -288,6 +289,11 @@ class LoRAFinetuneRecipeSingleDevice(FTRecipeInterface):
             lora_missing=lora_missing,
             lora_unexpected=lora_unexpected,
         )
+
+        # TODO(calvinpelletier): TODO
+        if cfg_model.get("use_dora", False):
+            initialize_dora_model(model)
+
         # Validate model adapter params were loaded in with the expected dtype
         # TODO (rohan-varma): Further validation to ensure the appropriate base params
         # are NF4 vs bf16 based on the quantization config.

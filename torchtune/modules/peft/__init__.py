@@ -4,11 +4,13 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from .dora import DoRALinear
 from .lora import LoRALinear
 from .peft_utils import (  # noqa
     AdapterModule,
     disable_adapter,
     get_adapter_params,
+    initialize_dora_model,
     LORA_ATTN_MODULES,
     set_trainable_params,
     validate_missing_and_unexpected_for_lora,
@@ -23,4 +25,6 @@ __all__ = [
     "validate_missing_and_unexpected_for_lora",
     "validate_state_dict_for_lora",
     "disable_adapter",
+    "DoRALinear",
+    "initialize_dora_model",
 ]

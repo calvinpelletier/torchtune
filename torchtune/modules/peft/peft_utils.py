@@ -320,3 +320,9 @@ def validate_missing_and_unexpected_for_lora(
                 raise AssertionError(f"Missing LoRA key {k} from adapter state dict")
     if lora_unexpected:
         raise AssertionError("Unexpected key loading adapter")
+
+
+def initialize_dora_model(model):
+    for module in model.modules():
+        if hasattr(module, "initialize_dora"):
+            module.initialize_dora()
