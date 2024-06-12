@@ -12,6 +12,13 @@ from torch import nn, Tensor
 from torchtune.modules import CausalSelfAttention, KVCache
 
 
+class Tmp:
+    def __init__(self):
+        self.x = []
+        self.y = []
+tmp = Tmp()
+
+
 class TransformerDecoderLayer(nn.Module):
     """Transformer layer derived from the Llama2 model. Normalization is applied before the attention **and** FF layer.
 
@@ -34,6 +41,7 @@ class TransformerDecoderLayer(nn.Module):
         self.attn = attn
         self.mlp_norm = mlp_norm
         self.mlp = mlp
+        self.tmp = False
 
     def forward(
         self,
@@ -73,7 +81,12 @@ class TransformerDecoderLayer(nn.Module):
         # Input tensor and attention output have the same shape
         # [b, s, d]
         # Norm applied before self-attention
-        attn_out = self.attn(self.sa_norm(x), mask=mask, input_pos=input_pos)
+        normed = self.sa_norm(x)
+        if self.tmp:
+            tmp.x.append(normed.clone().cpu().numpy())
+        attn_out = self.attn(normed, mask=mask, input_pos=input_pos)
+        if self.tmp:
+            tmp.y.append(attn_out.clone().cpu().numpy())
 
         # Residual connection; shape: [b, s, d]
         h = attn_out + x

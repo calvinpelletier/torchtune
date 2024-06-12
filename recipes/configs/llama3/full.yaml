@@ -1,35 +1,39 @@
-# Config for single device LoRA finetuning in lora_finetune_single_device.py
+# Config for single device full finetuning in full_finetune_single_device.py
 # using a Llama3 8B Instruct model
 #
 # This config assumes that you've run the following command before launching
 # this run:
 #   tune download meta-llama/Meta-Llama-3-8B-Instruct --output-dir /tmp/Meta-Llama-3-8B-Instruct --hf-token <HF_TOKEN>
 #
+# The default config uses an optimizer from bitsandbytes. If you do not have it installed,
+# you can install it with
+#   pip install bitsandbytes
+#
 # To launch on a single device, run the following command from root:
-#   tune run lora_finetune_single_device --config llama3/8B_lora_single_device
+#   tune run full_finetune_single_device --config llama3/8B_full_single_device
 #
 # You can add specific overrides through the command line. For example
 # to override the checkpointer directory while launching training
 # you can run:
-#   tune run lora_finetune_single_device --config llama3/8B_lora_single_device checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
+#   tune run full_finetune_single_device --config llama3/8B_full_single_device checkpointer.checkpoint_dir=<YOUR_CHECKPOINT_DIR>
 #
 # This config works only for training on single device.
 
-
-# Model Arguments
-model:
-  _component_: torchtune.models.llama3.dora_llama3_8b
-  lora_attn_modules: ['q_proj', 'v_proj']
-  apply_lora_to_mlp: False
-  apply_lora_to_output: False
-  lora_rank: 8
-  lora_alpha: 16
-  use_dora: True
 
 # Tokenizer
 tokenizer:
   _component_: torchtune.models.llama3.llama3_tokenizer
   path: /home/cpelletier/model/llama3-8b/original/tokenizer.model
+
+# Dataset
+dataset:
+  _component_: torchtune.datasets.alpaca_dataset
+seed: null
+shuffle: True
+
+# Model Arguments
+model:
+  _component_: torchtune.models.llama3.llama3_8b
 
 checkpointer:
   _component_: torchtune.utils.FullModelMetaCheckpointer
@@ -38,50 +42,37 @@ checkpointer:
     consolidated.00.pth
   ]
   recipe_checkpoint: null
-  output_dir: /home/cpelletier/out/dora0
+  output_dir: /home/cpelletier/out/full0
   model_type: LLAMA3
 resume_from_checkpoint: False
 
-# Dataset and Sampler
-dataset:
-  _component_: torchtune.datasets.alpaca_cleaned_dataset
-seed: 0
-shuffle: True
+# Fine-tuning arguments
 batch_size: 2
-
-# Optimizer and Scheduler
+epochs: 3
 optimizer:
-  _component_: torch.optim.AdamW
-  weight_decay: 0.01
-  lr: 3e-4
-lr_scheduler:
-  _component_: torchtune.modules.get_cosine_schedule_with_warmup
-  num_warmup_steps: 100
-
+  _component_: bitsandbytes.optim.PagedAdamW8bit
+  lr: 2e-5
 loss:
   _component_: torch.nn.CrossEntropyLoss
-
-# Training
-epochs: 1
 max_steps_per_epoch: null
-gradient_accumulation_steps: 64
+gradient_accumulation_steps: 1
+optimizer_in_bwd: True
 compile: False
 
+# Training environment
+device: cuda
+
+# Memory management
+enable_activation_checkpointing: True
+
+# Reduced precision
+dtype: bf16
+
 # Logging
-output_dir: /home/cpelletier/log/dora0
 metric_logger:
   _component_: torchtune.utils.metric_logging.WandBLogger
   group: dora
   log_dir: ${output_dir}
+output_dir: /home/cpelletier/log/full0
 log_every_n_steps: 1
 log_peak_memory_stats: False
-
-# Environment
-device: cuda
-dtype: bf16
-enable_activation_checkpointing: True
-
-# Profiler (disabled)
-profiler:
-  _component_: torchtune.utils.profiler
-  enabled: False

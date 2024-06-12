@@ -200,6 +200,32 @@ def _get_lora_modules(state_dict: Dict[str, Any]) -> Set[str]:
     Returns:
         Set[str]: Set of keys in the state dict that correspond to LoRA modules.
     """
+    lora_modules = set()
+    for k in state_dict.keys():
+        if "lora_" not in k:
+            continue
+        parts = k.split(".")
+        for i, part in enumerate(parts):
+            if "lora_" in part:
+                lora_modules.add(".".join(parts[:i]))
+                break
+    return lora_modules
+
+
+def _get_lora_modules2(state_dict: Dict[str, Any]) -> Set[str]:
+    """
+    Get the keys from a state dict that correspond to LoRALinear modules.
+
+    For example, if state_dict is the state dict of model and model.x.y.z is a
+    LoRALinear, this method will return "model.x.y.z", not
+    "model.x.y.z.lora_a.weight" or "model.x.y.z.lora_b.weight".
+
+    Args:
+        state_dict (Dict[str, Any]): State dict from a model.
+
+    Returns:
+        Set[str]: Set of keys in the state dict that correspond to LoRA modules.
+    """
     lora_keys = [k for k in state_dict.keys() if "lora" in k]
     return set(
         [
