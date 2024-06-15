@@ -103,9 +103,9 @@ class LoRALinear2(nn.Module, AdapterModule):
         """
         TODO(cpelletier)
         """
+        base_weight = self.weight.to(torch.float32)
         lora_weight = self.lora_b.weight @ self.lora_a.weight
-        self.lora_magnitude = nn.Parameter(self._get_weight_norm(lora_weight))
-        # self.lora_magnitude.data = self._get_weight_norm(lora_weight)
+        self.lora_magnitude.data = self._get_weight_norm(base_weight, lora_weight)
 
     def _create_weight_and_bias(self):
         """
@@ -123,6 +123,12 @@ class LoRALinear2(nn.Module, AdapterModule):
                 )
             bias = linear.bias
         return weight, bias
+
+    def _get_weight_norm(self, base_weight, lora_weight) -> torch.Tensor:
+        # calculate L2 norm of weight matrix, column-wise
+        weight = base_weight + self.scaling * lora_weight
+        weight_norm = torch.linalg.norm(weight, dim=1)
+        return weight_norm
 
     def adapter_params(self) -> List[str]:
         """
@@ -144,11 +150,12 @@ class LoRALinear2(nn.Module, AdapterModule):
             Tensor: output tensor with shape ``(..., out_dim)``
 
         """
-        base_out = self._base_forward()
+        base_out = self._base_forward(x)
         if self.disabled:
             return base_out
 
-        lora_out = self.scaling * self.lora_b(self.lora_a(self.dropout(x)))
+        x = self.dropout(x)
+        lora_out = self.scaling * self.lora_b(self.lora_a(x))
         if self.decompose:
             lora_out = self._dora_forward(x, lora_out)
         return base_out + lora_out
@@ -160,19 +167,13 @@ class LoRALinear2(nn.Module, AdapterModule):
 
     def _dora_forward(self, x, lora_out):
         lora_weight = self.lora_b.weight @ self.lora_a.weight
-        weight_norm = self._get_weight_norm(lora_weight.detach()).detach()
-        mag_norm_scale = self.lora_magnitude / weight_norm
-        print("a", mag_norm_scale.shape)
-        mag_norm_scale = mag_norm_scale.view(1, -1)
-        print("b", mag_norm_scale.shape)
-        base_out = self._base_forward(x)
+        base_weight = self.weight.to(x.dtype)
+        weight_norm = self._get_weight_norm(base_weight, lora_weight.detach()).detach()
+
+        mag_norm_scale = (self.lora_magnitude / weight_norm).view(1, -1)
+        base_out = F.linear(x, base_weight)
         dora_out = (mag_norm_scale - 1) * base_out + mag_norm_scale * lora_out
         return dora_out
-
-    def _get_weight_norm(self, lora_weight):
-        weight = self.weight + self.scaling * lora_weight
-        weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
-        return weight_norm
 
 
 class LoRALinear(nn.Module, AdapterModule):
