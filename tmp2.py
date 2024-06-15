@@ -4,17 +4,65 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torchao.dtypes.nf4tensor import linear_nf4, to_nf4
 
-class CLI:
-    def dora(self):
-        m = DoraLinear(8, 4, 2, 1., dropout=0., decompose=True)
-        m.dora_init()
-        x = torch.randn(16, 8)
-        y = m(x)
-        print(y.shape)
-        y_ = torch.randn(16, 4)
-        loss = F.mse_loss(y, y_)
-        loss.backward()
+
+IN_DIM = 256
+OUT_DIM = 256
+
+
+def main():
+    for dropout in (0., 0.1):
+        for use_bias in (False, True):
+            for quantize_base in (False, True):
+                compare_dora(dropout, use_bias, quantize_base)
+
+
+def compare_dora(dropout, use_bias, quantize_base):
+    if use_bias and quantize_base:
+        # not supported yet
+        return
+    print(dropout, use_bias, quantize_base)
+
+    m1 = DoraLinear(
+        IN_DIM, OUT_DIM, 2, 1., 
+        dropout=dropout, use_bias=use_bias, quantize_base=quantize_base, decompose=True,
+    )
+    m2 = DoraLinear2(
+        IN_DIM, OUT_DIM, 2, 1., 
+        dropout=dropout, use_bias=use_bias, quantize_base=quantize_base, decompose=True,
+    )
+    m2.load_state_dict(m1.state_dict())
+    m1.weight.requires_grad_(False)
+    m2.weight.requires_grad_(False)
+    if use_bias:
+        m1.bias.requires_grad_(False)
+        m2.bias.requires_grad_(False)
+    if quantize_base:
+        assert torch.equal(m1.weight.to(torch.float32), m2.weight.to(torch.float32))
+    else:
+        assert torch.equal(m1.weight, m2.weight)
+    if use_bias:
+        assert torch.equal(m1.bias, m2.bias)
+    assert torch.equal(m1.lora_a.weight, m2.lora_a.weight)
+    assert torch.equal(m1.lora_b.weight, m2.lora_b.weight)
+    
+    m1.dora_init()
+    m2.dora_init()
+    assert torch.equal(m1.magnitude, m2.magnitude)
+
+    x = torch.randn(8, IN_DIM)
+    y = torch.randn(8, OUT_DIM)
+    torch.manual_seed(0)
+    y1 = m1(x.detach())
+    torch.manual_seed(0)
+    y2 = m2(x.detach())
+    F.mse_loss(y1, y.detach()).backward()
+    F.mse_loss(y2, y.detach()).backward()
+    assert torch.equal(y1, y2)
+    assert torch.equal(m1.magnitude.grad, m2.magnitude.grad)
+    assert torch.equal(m1.lora_a.weight.grad, m2.lora_a.weight.grad)
+    assert torch.equal(m1.lora_b.weight.grad, m2.lora_b.weight.grad)
 
 
 class DoraLinear2(nn.Module):
@@ -30,7 +78,21 @@ class DoraLinear2(nn.Module):
         decompose: bool = False,
     ):
         super().__init__()
-        self.base_layer = nn.Linear(in_dim, out_dim, bias=False)
+        self.use_bias = use_bias
+        self.quantize_base = quantize_base
+        
+        linear = nn.Linear(in_features=in_dim, out_features=out_dim, bias=use_bias)
+        weight = linear.weight if not quantize_base else to_nf4(linear.weight)
+        bias = None
+        if use_bias:
+            if quantize_base:
+                raise NotImplementedError()
+            bias = linear.bias
+        self.register_parameter("weight", nn.Parameter(weight))
+        self.register_parameter(
+            "bias", nn.Parameter(bias) if bias is not None else None
+        )
+
         self.lora_a = nn.Linear(in_dim, rank, bias=False)
         self.lora_b = nn.Linear(rank, out_dim, bias=False)
         self.scaling = alpha / rank
@@ -49,7 +111,8 @@ class DoraLinear2(nn.Module):
             lora_b = lora_b.float()
 
         # weight = dequantize_module_weight(base_layer)
-        weight = self.base_layer.weight
+        # weight = self.base_layer.weight
+        weight = self.weight.to(self.lora_a.weight.dtype)
         
         lora_weight = lora_b @ lora_a
 
@@ -60,7 +123,7 @@ class DoraLinear2(nn.Module):
         self.magnitude = nn.Parameter(weight_norm, requires_grad=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        result = self.base_layer(x)
+        result = self._base_forward(x)
         torch_result_dtype = result.dtype
         x = x.to(self.lora_a.weight.dtype)
         x = self.dropout(x)
@@ -70,6 +133,11 @@ class DoraLinear2(nn.Module):
             result = result + self._dora_forward(x)
         result = result.to(torch_result_dtype)
         return result
+
+    def _base_forward(self, x):
+        if self.quantize_base:
+            return linear_nf4(input=x, weight=self.weight)
+        return F.linear(x, self.weight, self.bias)
     
     def _dora_forward(self, x):
         lora_result = self.lora_b(self.lora_a(x))
@@ -82,7 +150,8 @@ class DoraLinear2(nn.Module):
         magnitude = self.magnitude
         
         # weight = dequantize_module_weight(base_layer)
-        weight = self.base_layer.weight
+        # weight = self.base_layer.weight
+        weight = self.weight.to(x.dtype)
         
         weight = weight.to(x.dtype)
         weight_norm = self._get_weight_norm(weight, lora_weight.detach())
@@ -115,7 +184,6 @@ class DoraLinear2(nn.Module):
         weight = weight + self.scaling * lora_weight
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
-
 
 
 class DoraLinear(nn.Module):
@@ -131,7 +199,21 @@ class DoraLinear(nn.Module):
         decompose: bool = False,
     ):
         super().__init__()
-        self.base_layer = nn.Linear(in_dim, out_dim, bias=False)
+        self.use_bias = use_bias
+        self.quantize_base = quantize_base
+        
+        linear = nn.Linear(in_features=in_dim, out_features=out_dim, bias=use_bias)
+        weight = linear.weight if not quantize_base else to_nf4(linear.weight)
+        bias = None
+        if use_bias:
+            if quantize_base:
+                raise NotImplementedError()
+            bias = linear.bias
+        self.register_parameter("weight", nn.Parameter(weight))
+        self.register_parameter(
+            "bias", nn.Parameter(bias) if bias is not None else None
+        )
+
         self.lora_a = nn.Linear(in_dim, rank, bias=False)
         self.lora_b = nn.Linear(rank, out_dim, bias=False)
         self.scaling = alpha / rank
@@ -150,7 +232,8 @@ class DoraLinear(nn.Module):
             lora_b = lora_b.float()
 
         # weight = dequantize_module_weight(base_layer)
-        weight = self.base_layer.weight
+        # weight = self.base_layer.weight
+        weight = self.weight.to(self.lora_a.weight.dtype)
         
         lora_weight = lora_b @ lora_a
 
@@ -161,7 +244,7 @@ class DoraLinear(nn.Module):
         self.magnitude = nn.Parameter(weight_norm, requires_grad=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        result = self.base_layer(x)
+        result = self._base_forward(x)
         torch_result_dtype = result.dtype
         x = x.to(self.lora_a.weight.dtype)
         x = self.dropout(x)
@@ -171,6 +254,11 @@ class DoraLinear(nn.Module):
             result = result + self._dora_forward(x)
         result = result.to(torch_result_dtype)
         return result
+
+    def _base_forward(self, x):
+        if self.quantize_base:
+            return linear_nf4(input=x, weight=self.weight)
+        return F.linear(x, self.weight, self.bias)
     
     def _dora_forward(self, x):
         lora_result = self.lora_b(self.lora_a(x))
@@ -183,7 +271,8 @@ class DoraLinear(nn.Module):
         magnitude = self.magnitude
         
         # weight = dequantize_module_weight(base_layer)
-        weight = self.base_layer.weight
+        # weight = self.base_layer.weight
+        weight = self.weight.to(x.dtype)
         
         weight = weight.to(x.dtype)
         weight_norm = self._get_weight_norm(weight, lora_weight.detach())
@@ -216,7 +305,7 @@ class DoraLinear(nn.Module):
         weight = weight + self.scaling * lora_weight
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
-
+        
         
 if __name__ == '__main__':
-    Fire(CLI)
+    main()
