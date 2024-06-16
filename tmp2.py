@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from torchao.dtypes.nf4tensor import linear_nf4, to_nf4
 
-from torchtune.modules.peft.lora import LoRALinear2
+from torchtune.modules.peft.lora import LoRALinear
 
 
 IN_DIM = 256
@@ -31,19 +31,26 @@ def compare_lora(dropout, use_bias, quantize_base, decompose):
         IN_DIM, OUT_DIM, 2, 1., 
         dropout=dropout, use_bias=use_bias, quantize_base=quantize_base, decompose=decompose,
     )
-    m2 = LoraLinear(
+    m2 = LoRALinear(
         IN_DIM, OUT_DIM, 2, 1., 
         dropout=dropout, use_bias=use_bias, quantize_base=quantize_base, decompose=decompose,
     )
-    m2.load_state_dict(m1.state_dict())
+
+    sd = m1.state_dict()
+    if quantize_base:
+        sd['weight'] = sd['weight'].to(torch.float32)
+    m2.load_state_dict(sd)
+    
     m1.weight.requires_grad_(False)
     m2.weight.requires_grad_(False)
     if use_bias:
         m1.bias.requires_grad_(False)
         m2.bias.requires_grad_(False)
+    
     if decompose:
         m1.initialize_dora()
         m2.initialize_dora()    
+    
     compare_models(m1, m2, use_bias, quantize_base, decompose)
     
     opt1 = torch.optim.Adam(m1.parameters())
@@ -142,9 +149,9 @@ class LoraLinear(nn.Module):
             nn.init.ones_(self.lora_magnitude)
 
     def initialize_dora(self) -> None:
-        weight = self.weight.to(torch.float32)
+        base_weight = self.weight.to(torch.float32)
         lora_weight = self.lora_b.weight @ self.lora_a.weight
-        weight_norm = self._get_weight_norm(weight, lora_weight)
+        weight_norm = self._get_weight_norm(base_weight, lora_weight)
         self.lora_magnitude.data = weight_norm
 
     def _create_weight_and_bias(self):
