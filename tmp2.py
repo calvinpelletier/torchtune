@@ -1,4 +1,5 @@
 import math
+from copy import deepcopy
 
 import torch
 from torch import nn, Tensor
@@ -7,10 +8,13 @@ import torch.nn.functional as F
 from torchao.dtypes.nf4tensor import linear_nf4, to_nf4
 
 from torchtune.modules.peft.lora import LoRALinear
+from torchtune.modules.peft.peft_utils import get_merged_lora_ckpt
 
 
 IN_DIM = 256
 OUT_DIM = 256
+RANK = 2
+ALPHA = 1.
 
 
 def main():
@@ -28,11 +32,11 @@ def compare_lora(dropout, use_bias, quantize_base, decompose):
     print(dropout, use_bias, quantize_base, decompose)
 
     m1 = LoraLinearReference(
-        IN_DIM, OUT_DIM, 2, 1., 
+        IN_DIM, OUT_DIM, RANK, ALPHA, 
         dropout=dropout, use_bias=use_bias, quantize_base=quantize_base, decompose=decompose,
     )
     m2 = LoRALinear(
-        IN_DIM, OUT_DIM, 2, 1., 
+        IN_DIM, OUT_DIM, RANK, ALPHA, 
         dropout=dropout, use_bias=use_bias, quantize_base=quantize_base, decompose=decompose,
     )
 
@@ -76,6 +80,19 @@ def compare_lora(dropout, use_bias, quantize_base, decompose):
     opt2.step()
     compare_models(m1, m2, use_bias, quantize_base, decompose)
 
+    sd = get_merged_lora_ckpt(Wrapper(m2).state_dict(), RANK, ALPHA, decompose)
+    m3 = Wrapper(nn.Linear(IN_DIM, OUT_DIM, bias=use_bias))
+    m3.load_state_dict(sd)
+    m3 = m3.module
+
+    x = torch.randn(8, IN_DIM)
+    y = torch.randn(8, OUT_DIM)
+    torch.manual_seed(0)
+    y1 = m1(x.detach())
+    torch.manual_seed(0)
+    y2 = m2(x.detach())
+    assert torch.equal(y1, y2)
+
 
 def compare_models(m1, m2, use_bias, quantize_base, decompose):
     if quantize_base:
@@ -89,6 +106,15 @@ def compare_models(m1, m2, use_bias, quantize_base, decompose):
     if decompose:
         assert torch.equal(m1.lora_magnitude, m2.lora_magnitude)
 
+
+class Wrapper(nn.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, x):
+        return self.module(x)
+    
 
 class LoraLinear(nn.Module):
     def __init__(

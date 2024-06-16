@@ -7,6 +7,7 @@
 import contextlib
 from typing import Any, Dict, Generator, List, Literal, Optional, Protocol, Set
 
+import torch
 from torch import nn
 
 # Modules from CausalSelfAttention that LoRA can be applied to
@@ -235,8 +236,9 @@ def _get_lora_modules2(state_dict: Dict[str, Any]) -> Set[str]:
     )
 
 
+# @torch.no_grad
 def get_merged_lora_ckpt(
-    state_dict: Dict[str, Any], rank: int, alpha: float
+    state_dict: Dict[str, Any], rank: int, alpha: float, is_dora: bool,
 ) -> Dict[str, Any]:
     """
     Merge LoRA weights into the base model format for efficient inference.
@@ -259,9 +261,20 @@ def get_merged_lora_ckpt(
     for module in lora_modules:
         lora_a_weight = state_dict[f"{module}.lora_a.weight"]
         lora_b_weight = state_dict[f"{module}.lora_b.weight"]
-        state_dict[f"{module}.weight"] += (alpha / rank) * lora_b_weight @ lora_a_weight
+        
+        base_weight = state_dict[f"{module}.weight"]
+        lora_weight = (alpha / rank) * lora_b_weight @ lora_a_weight
+        if is_dora:
+            weight_norm = torch.linalg.norm(base_weight + lora_weight, dim=1).detach()
+            new_weight = (base_weight / weight_norm).view(-1, 1) * (base_weight + lora_weight)
+        else:
+            new_weight = base_weight + lora_weight
+        state_dict[f"{module}.weight"] = new_weight
+        
         del state_dict[f"{module}.lora_a.weight"]
         del state_dict[f"{module}.lora_b.weight"]
+        if is_dora:
+            del state_dict[f"{module}.lora_magnitude"]
     return state_dict
 
 
