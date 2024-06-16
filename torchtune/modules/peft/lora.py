@@ -60,6 +60,7 @@ class LoRALinear(nn.Module, AdapterModule):
         self.use_bias = use_bias
         self.quantize_base = quantize_base
         self.decompose = decompose
+        self.fast_dora = not use_bias and dropout == 0.
 
         # 'self.disabled' is a flag showing whether to turn off LoRA adapters,
         # this can be used in DPO for treating the lora adapters as the policy model
@@ -99,13 +100,14 @@ class LoRALinear(nn.Module, AdapterModule):
             # after loading the base model weights in `self.initialize_dora()`.
             nn.init.ones_(self.lora_magnitude)
 
-    def initialize_dora(self):
+    def on_base_params_loaded(self):
         """
         TODO(cpelletier)
         """
-        base_weight = self.weight.to(torch.float32)
-        lora_weight = self.lora_b.weight @ self.lora_a.weight
-        self.lora_magnitude.data = self._get_weight_norm(base_weight, lora_weight)
+        if self.decompose:
+            base_weight = self.weight.to(torch.float32)
+            lora_weight = self.lora_b.weight @ self.lora_a.weight
+            self.lora_magnitude.data = self._get_weight_norm(base_weight, lora_weight)
 
     def _create_weight_and_bias(self):
         """
@@ -141,6 +143,40 @@ class LoRALinear(nn.Module, AdapterModule):
             adapter_params.append("lora_magnitude")
         return adapter_params
 
+    # def forward(self, x: Tensor) -> Tensor:
+    #     """
+    #     Args:
+    #         x (Tensor): input tensor with shape ``(..., in_dim)``
+
+    #     Returns:
+    #         Tensor: output tensor with shape ``(..., out_dim)``
+
+    #     """
+    #     base_out = self._base_forward(x)
+    #     if self.disabled:
+    #         return base_out
+
+    #     x = self.dropout(x)
+    #     lora_out = self.scaling * self.lora_b(self.lora_a(x))
+    #     if self.decompose:
+    #         lora_out = self._dora_forward(x, lora_out)
+    #     return base_out + lora_out
+
+    # def _base_forward(self, x):
+    #     if self.quantize_base:
+    #         return linear_nf4(input=x, weight=self.weight)
+    #     return F.linear(x, self.weight, self.bias)
+
+    # def _dora_forward(self, x, lora_out):
+    #     lora_weight = self.lora_b.weight @ self.lora_a.weight
+    #     base_weight = self.weight.to(x.dtype)
+    #     weight_norm = self._get_weight_norm(base_weight, lora_weight.detach()).detach()
+
+    #     mag_norm_scale = (self.lora_magnitude / weight_norm).view(1, -1)
+    #     base_out = F.linear(x, base_weight)
+    #     dora_out = (mag_norm_scale - 1) * base_out + mag_norm_scale * lora_out
+    #     return dora_out
+
     def forward(self, x: Tensor) -> Tensor:
         """
         Args:
@@ -157,7 +193,7 @@ class LoRALinear(nn.Module, AdapterModule):
         x = self.dropout(x)
         lora_out = self.scaling * self.lora_b(self.lora_a(x))
         if self.decompose:
-            lora_out = self._dora_forward(x, lora_out)
+            lora_out = self._dora_forward(x, lora_out, base_out)
         return base_out + lora_out
 
     def _base_forward(self, x):
@@ -165,13 +201,14 @@ class LoRALinear(nn.Module, AdapterModule):
             return linear_nf4(input=x, weight=self.weight)
         return F.linear(x, self.weight, self.bias)
 
-    def _dora_forward(self, x, lora_out):
+    def _dora_forward(self, x, lora_out, base_out):
         lora_weight = self.lora_b.weight @ self.lora_a.weight
         base_weight = self.weight.to(x.dtype)
         weight_norm = self._get_weight_norm(base_weight, lora_weight.detach()).detach()
 
         mag_norm_scale = (self.lora_magnitude / weight_norm).view(1, -1)
-        base_out = F.linear(x, base_weight)
+        if not self.fast_dora:
+            base_out = F.linear(x, base_weight)
         dora_out = (mag_norm_scale - 1) * base_out + mag_norm_scale * lora_out
         return dora_out
 

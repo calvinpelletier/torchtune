@@ -362,7 +362,10 @@ def validate_missing_and_unexpected_for_lora(
         raise AssertionError("Unexpected key loading adapter")
 
 
-def initialize_dora_model(model):
-    for module in model.modules():
-        if hasattr(module, "initialize_dora"):
-            module.initialize_dora()
+def notify_base_params_loaded(model):
+    model.apply(_notify_base_params_loaded)
+
+
+def _notify_base_params_loaded(module):
+    if hasattr(module, "on_base_params_loaded"):
+        module.on_base_params_loaded()

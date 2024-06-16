@@ -24,7 +24,6 @@ model:
   apply_lora_to_output: False
   lora_rank: 8
   lora_alpha: 16
-  use_dora: True
 
 # Tokenizer
 tokenizer:

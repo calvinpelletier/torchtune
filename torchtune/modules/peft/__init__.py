@@ -10,7 +10,7 @@ from .peft_utils import (  # noqa
     AdapterModule,
     disable_adapter,
     get_adapter_params,
-    initialize_dora_model,
+    notify_base_params_loaded,
     LORA_ATTN_MODULES,
     set_trainable_params,
     validate_missing_and_unexpected_for_lora,
