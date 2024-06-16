@@ -85,13 +85,13 @@ def compare_lora(dropout, use_bias, quantize_base, decompose):
     m3.load_state_dict(sd)
     m3 = m3.module
 
-    x = torch.randn(8, IN_DIM)
-    y = torch.randn(8, OUT_DIM)
-    torch.manual_seed(0)
-    y1 = m1(x.detach())
-    torch.manual_seed(0)
-    y2 = m2(x.detach())
-    assert torch.equal(y1, y2)
+    m2.eval()
+    m3.eval()
+    with torch.no_grad():
+        x = torch.randn(8, IN_DIM)
+        y2 = m2(x)
+        y3 = m3(x)
+        assert torch.allclose(y2, y3, rtol=1e-4, atol=1e-6)
 
 
 def compare_models(m1, m2, use_bias, quantize_base, decompose):

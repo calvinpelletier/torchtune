@@ -425,7 +425,7 @@ class TestGetMergedLoRACkpt:
     def test_get_merged_lora_ckpt(self):
         dummy_model = self.dummy_model()
         merged_sd = get_merged_lora_ckpt(
-            deepcopy(dummy_model.state_dict()), rank=RANK, alpha=ALPHA
+            deepcopy(dummy_model.state_dict()), rank=RANK, alpha=ALPHA, is_dora=False,
         )
         expected_merged_weight = torch.Tensor(
             [

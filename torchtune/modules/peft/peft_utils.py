@@ -236,7 +236,7 @@ def _get_lora_modules2(state_dict: Dict[str, Any]) -> Set[str]:
     )
 
 
-# @torch.no_grad
+@torch.no_grad
 def get_merged_lora_ckpt(
     state_dict: Dict[str, Any], rank: int, alpha: float, is_dora: bool,
 ) -> Dict[str, Any]:
@@ -262,14 +262,15 @@ def get_merged_lora_ckpt(
         lora_a_weight = state_dict[f"{module}.lora_a.weight"]
         lora_b_weight = state_dict[f"{module}.lora_b.weight"]
         
-        base_weight = state_dict[f"{module}.weight"]
+        base_weight = state_dict[f"{module}.weight"].to(torch.float32)
         lora_weight = (alpha / rank) * lora_b_weight @ lora_a_weight
+        merged_weight = base_weight + lora_weight
         if is_dora:
+            mag = state_dict[f'{module}.lora_magnitude']
             weight_norm = torch.linalg.norm(base_weight + lora_weight, dim=1).detach()
-            new_weight = (base_weight / weight_norm).view(-1, 1) * (base_weight + lora_weight)
-        else:
-            new_weight = base_weight + lora_weight
-        state_dict[f"{module}.weight"] = new_weight
+            mag_norm_scale = (mag / weight_norm).view(-1, 1) 
+            merged_weight *= mag_norm_scale
+        state_dict[f"{module}.weight"] = merged_weight
         
         del state_dict[f"{module}.lora_a.weight"]
         del state_dict[f"{module}.lora_b.weight"]
