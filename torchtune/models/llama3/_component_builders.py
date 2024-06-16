@@ -150,7 +150,7 @@ def lora_llama3(
     lora_rank: int,
     lora_alpha: float,
     lora_dropout: float = 0.0,
-    use_dora: bool = False,
+    lora_decompose_weight: bool = False,
     # Quantization args
     quantize_base: bool = False,
 ) -> TransformerDecoder:
@@ -206,7 +206,7 @@ def lora_llama3(
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
         quantize_base=quantize_base,
-        use_dora=use_dora
+        lora_decompose_weight=lora_decompose_weight
     )
 
     hidden_dim = intermediate_dim if intermediate_dim else scale_hidden_dim_for_mlp(embed_dim)
@@ -218,7 +218,7 @@ def lora_llama3(
             lora_alpha=lora_alpha,
             quantize_base=quantize_base,
             lora_dropout=lora_dropout,
-            use_dora=use_dora,
+            lora_decompose_weight=lora_decompose_weight,
         )
     else:
         mlp = llama3_mlp(dim=embed_dim, hidden_dim=hidden_dim)
@@ -234,7 +234,7 @@ def lora_llama3(
 
     # TODO: quantize_base is not applied to final output_proj currently.
     if apply_lora_to_output:
-        lora_cls = DoRALinear if use_dora else LoRALinear
+        lora_cls = DoRALinear if lora_decompose_weight else LoRALinear
         output_proj = lora_cls(embed_dim, vocab_size, rank=lora_rank, alpha=lora_alpha, dropout=lora_dropout)
     else:
         output_proj = nn.Linear(embed_dim, vocab_size, bias=False)
@@ -275,7 +275,7 @@ def lora_llama3_self_attention(
     lora_alpha: float,
     lora_dropout: float = 0.0,
     quantize_base: bool = False,
-    use_dora: bool = False,
+    lora_decompose_weight: bool = False,
 ) -> CausalSelfAttention:
     """
     Return an instance of :func:`~torchtune.modules.CausalSelfAttention` with LoRA
@@ -315,7 +315,7 @@ def lora_llama3_self_attention(
 
     head_dim = embed_dim // num_heads
     num_kv_heads = num_kv_heads if num_kv_heads else num_heads
-    lora_cls = DoRALinear if use_dora else LoRALinear
+    lora_cls = DoRALinear if lora_decompose_weight else LoRALinear
     q_proj = (
         lora_cls(
             embed_dim,
@@ -389,9 +389,9 @@ def lora_llama3_mlp(
     lora_alpha: float,
     lora_dropout: float = 0.0,
     quantize_base: bool = False,
-    use_dora: bool = False,
+    lora_decompose_weight: bool = False,
 ) -> FeedForward:
-    lora_cls = DoRALinear if use_dora else LoRALinear
+    lora_cls = DoRALinear if lora_decompose_weight else LoRALinear
     gate_proj = lora_cls(
         in_dim=dim,
         out_dim=hidden_dim,

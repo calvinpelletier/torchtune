@@ -77,7 +77,7 @@ def lora_llama3_8b(
     apply_lora_to_output: bool = False,
     lora_rank: int = 8,
     lora_alpha: float = 16,
-    use_dora = False,
+    lora_decompose_weight = False,
     quantize_base: bool = False,
 ) -> TransformerDecoder:
     """
@@ -119,7 +119,7 @@ def lora_llama3_8b(
         lora_rank=lora_rank,
         lora_alpha=lora_alpha,
         lora_dropout=0.05,
-        use_dora=use_dora,
+        lora_decompose_weight=lora_decompose_weight,
         quantize_base=quantize_base,
     )
 
@@ -131,7 +131,7 @@ def lora_llama3_70b(
     lora_rank: int = 8,
     lora_alpha: float = 16,
     quantize_base: bool = False,
-    use_dora = False,
+    lora_decompose_weight = False,
 ) -> TransformerDecoder:
     """
     Builder for creating a Llama3 70B model with LoRA enabled.
@@ -172,8 +172,8 @@ def lora_llama3_70b(
         lora_rank=lora_rank,
         lora_alpha=lora_alpha,
         lora_dropout=0.05,
+        lora_decompose_weight=lora_decompose_weight,
         quantize_base=quantize_base,
-        use_dora=use_dora,
     )
 
 
@@ -185,4 +185,6 @@ that LoRA is applied to are quantized per the QLoRA paper: https://arxiv.org/abs
 Please see `lora_llama3_8b` for full API arguments.
 """
 
-dora_llama3_8b = partial(lora_llama3_8b, use_dora=True)
+dora_llama3_8b = partial(lora_llama3_8b, lora_decompose_weight=True)
+
+qdora_llama3_8b = partial(lora_llama3_8b, lora_decompose_weight=True, quantize_base=True)
